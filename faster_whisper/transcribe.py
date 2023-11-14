@@ -133,14 +133,33 @@ class WhisperModel:
             intra_threads=cpu_threads,
             inter_threads=num_workers,
         )
+        # TODO: check if it's large-v3 by inspecting `self.model` instead?
+        is_large_v3 = "large-v3" in model_size_or_path
 
         tokenizer_file = os.path.join(model_path, "tokenizer.json")
         if os.path.isfile(tokenizer_file):
             self.hf_tokenizer = tokenizers.Tokenizer.from_file(tokenizer_file)
         else:
-            self.hf_tokenizer = tokenizers.Tokenizer.from_pretrained(
-                "openai/whisper-tiny" + ("" if self.model.is_multilingual else ".en")
-            )
+            if is_large_v3:
+                 # Tokenizer for large-v3 is different, so we need to load as in whisper-large-v3
+                 # and monkey patch it to have the `token_to_id` method.
+                 # TODO: load the new tokenizer without requiring `transformers`
+                 from transformers import AutoProcessor
+
+                 processor = AutoProcessor.from_pretrained("openai/whisper-large-v3")
+                 self.hf_tokenizer = processor.tokenizer
+                 self.hf_tokenizer.token_to_id = (
+                     lambda token: self.hf_tokenizer.convert_tokens_to_ids(token)
+                 )
+            else:
+                self.hf_tokenizer = tokenizers.Tokenizer.from_pretrained(
+                    "openai/whisper-tiny"
+                    + ("" if self.model.is_multilingual else ".en")
+                )
+
+        self.feature_extractor = FeatureExtractor(
+            feature_size=80 if not is_large_v3 else 128
+        )
 
         self.feature_extractor = FeatureExtractor()
         self.num_samples_per_token = self.feature_extractor.hop_length * 2
